@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GARA: LADDER_OS_STABLE</title>
+    <style>
+        :root { 
+            --bg: #050505; 
+            --accent: #d4af37; 
+            --border: #222; 
+            --now-glow: #00ffcc;
+        }
+        body { 
+            background: var(--bg); 
+            color: #ccc; 
+            font-family: monospace; 
+            margin: 0; 
+            padding: 10px; 
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* شبكة التحكم علوية متناسقة */
+        .controls-grid { 
+            display: grid; 
+            grid-template-columns: repeat(3, 1fr); 
+            gap: 5px; 
+            margin-bottom: 15px; 
+            flex: 0 0 auto;
+        }
+        button { 
+            background: #111; 
+            border: 1px solid var(--border); 
+            color: var(--accent); 
+            padding: 10px; 
+            cursor: pointer; 
+            font-size: 0.75rem; 
+            font-weight: bold;
+        }
+        button:hover { background: #1a1a1a; border-color: #444; }
+        
+        /* تمديد زر الإعادة ليملأ الفراغ في السطر الثاني */
+        .redo-btn {
+            grid-column: span 2;
+        }
+
+        /* حاوية الأزرار العمودية لـ Export و Import فوق بعضهم */
+        .stacked-box {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .stacked-box button {
+            padding: 4px;
+            font-size: 0.65rem;
+            flex: 1;
+        }
+        
+        #ladder-container { 
+            width: 100%; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            flex: 1 1 auto;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+            padding-bottom: 40vh; 
+            padding-top: 10vh;
+        }
+
+        .rung { 
+            background: #080808; 
+            margin-bottom: 16px; 
+            padding: 14px; 
+            border: 1px solid var(--border); 
+            position: relative; 
+            display: flex;
+            justify-content: space-between;
+            gap: 15px;
+            transition: 0.3s;
+        }
+        .rung:hover { border-color: #444; }
+
+        .rung-right {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .rung-left {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+            min-width: 160px;
+            border-right: 1px solid #151515;
+            padding-right: 10px;
+        }
+
+        .rung.present-anchor {
+            border: 1px solid var(--now-glow);
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.15);
+        }
+        .rung.present-anchor::before {
+            content: "• CURRENT FOCUS";
+            position: absolute;
+            top: -10px;
+            right: 10px;
+            background: var(--bg);
+            color: var(--now-glow);
+            font-size: 0.6rem;
+            padding: 0 5px;
+            letter-spacing: 1px;
+        }
+        
+        input, textarea { 
+            width: 100%; 
+            background: none; 
+            border: none; 
+            color: #fff; 
+            font-size: 0.9rem; 
+            outline: none; 
+            font-family: inherit;
+        }
+
+        /* تنسيق التاريخ الرقمي مع الشخطة جهة اليسار */
+        .dt-input { 
+            color: var(--accent); 
+            font-weight: bold; 
+            letter-spacing: 1px;
+            border-bottom: 1px dashed #222;
+            padding-bottom: 2px;
+            direction: ltr; 
+            text-align: left;
+        }
+        .dt-input:focus { border-bottom-color: var(--accent); }
+        
+        textarea { resize: none; min-height: 50px; color: #aaa; font-size: 0.8rem; }
+        
+        .manual-order-box {
+            display: flex;
+            gap: 4px;
+            width: 100%;
+        }
+        .order-btn {
+            flex: 1;
+            padding: 3px;
+            font-size: 0.65rem;
+            color: #888;
+            border-color: #222;
+        }
+        .order-btn:hover { color: #fff; border-color: #555; }
+
+        .del-btn { 
+            color: #ff4444; 
+            font-size: 0.65rem; 
+            cursor: pointer; 
+            text-decoration: underline; 
+            margin-top: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls-grid">
+    <button onclick="addRung()">[+] إضافة موعد</button>
+    <button onclick="sortAndSave()">حفظ وترتيب ⇅</button>
+    
+    <div class="stacked-box">
+        <button onclick="exportData()">Export</button>
+        <button onclick="document.getElementById('import-in').click()">Import</button>
+    </div>
+    
+    <button onclick="undo()">تراجع [&lt;]</button>
+    <button class="redo-btn" onclick="redo()">إعادة [&gt;]</button>
+    
+    <input type="file" id="import-in" style="display:none" onchange="importData(this)">
+</div>
+
+<div id="ladder-container"></div>
+
+<script>
+    let ladderData = JSON.parse(localStorage.getItem('gara_ladder')) || [];
+    let undoStack = [JSON.stringify(ladderData)];
+    let redoStack = [];
+
+    // توليد التوقيت بصيغة رقمية نظيفة مع شخطة وفراغات: YYYY/MM/DD - HH:mm
+    function getNowNumericString() {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        const hr = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        return `${y}/${m}/${d} - ${hr}:${min}`;
+    }
+
+    function saveState() { 
+        undoStack.push(JSON.stringify(ladderData)); 
+        redoStack = []; 
+    }
+
+    function addRung() {
+        saveState();
+        ladderData.push({ dt: getNowNumericString(), title: '', note: '' });
+        render();
+        const container = document.getElementById('ladder-container');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function render() {
+        const container = document.getElementById('ladder-container');
+        container.innerHTML = '';
+        
+        const closestIndex = findClosestToNowIndex();
+
+        ladderData.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'rung';
+            
+            if (i === closestIndex && ladderData.length > 0) {
+                div.classList.add('present-anchor');
+            }
+
+            div.innerHTML = `
+                <div class="rung-right">
+                    <input type="text" placeholder="العنوان أو المرحلة..." value="${item.title}" onchange="ladderData[${i}].title=this.value; saveQuietly();">
+                    <textarea placeholder="الملاحظات والتفاصيل..." onchange="ladderData[${i}].note=this.value; saveQuietly();">${item.note}</textarea>
+                </div>
+                <div class="rung-left">
+                    <input type="text" class="dt-input" value="${item.dt}" placeholder="YYYY/MM/DD - HH:mm" onchange="ladderData[${i}].dt=this.value; saveQuietly();">
+                    <div class="manual-order-box">
+                        <button class="order-btn" onclick="moveItem(${i}, -1)">▲ رفع</button>
+                        <button class="order-btn" onclick="moveItem(${i}, 1)">▼ تنزيل</button>
+                    </div>
+                    <div class="del-btn" onclick="del(${i})">حذف المرحلة</div>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function moveItem(index, direction) {
+        saveState();
+        const targetIndex = index + direction;
+        if (targetIndex < 0 || targetIndex >= ladderData.length) return;
+        
+        const temp = ladderData[index];
+        ladderData[index] = ladderData[targetIndex];
+        ladderData[targetIndex] = temp;
+        
+        localStorage.setItem('gara_ladder', JSON.stringify(ladderData));
+        render();
+    }
+
+    // فك ترميز الشخطة برمجياً لقراءة التاريخ بشكل سليم في المتصفح والفرز
+    function parseSafeDate(dtStr) {
+        const cleaned = dtStr.trim().replace(' - ', 'T').replace(/\//g, '-');
+        return new Date(cleaned);
+    }
+
+    function findClosestToNowIndex() {
+        if (ladderData.length === 0) return -1;
+        const nowTime = new Date();
+        let closestIdx = 0;
+        let minDiff = Infinity;
+
+        ladderData.forEach((item, i) => {
+            const parsedDate = parseSafeDate(item.dt);
+            if (!isNaN(parsedDate)) {
+                const diff = Math.abs(parsedDate - nowTime);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestIdx = i;
+                }
+            }
+        });
+        return closestIdx;
+    }
+
+    function centerWheelOnPresent() {
+        const container = document.getElementById('ladder-container');
+        const activeRung = container.querySelector('.present-anchor');
+        if (activeRung) {
+            container.scrollTop = activeRung.offsetTop - (container.clientHeight / 2) + (activeRung.clientHeight / 2);
+        }
+    }
+
+    function saveQuietly() {
+        localStorage.setItem('gara_ladder', JSON.stringify(ladderData));
+    }
+
+    function sortAndSave() {
+        saveState();
+        // الترتيب التنازلي المعتمد على سلسلة النص الرقمية
+        ladderData.sort((a, b) => b.dt.localeCompare(a.dt));
+        localStorage.setItem('gara_ladder', JSON.stringify(ladderData));
+        render();
+        setTimeout(centerWheelOnPresent, 50);
+    }
+
+    function undo() {
+        if (undoStack.length > 1) {
+            redoStack.push(undoStack.pop());
+            ladderData = JSON.parse(undoStack[undoStack.length - 1]);
+            render();
+            setTimeout(centerWheelOnPresent, 50);
+        }
+    }
+
+    function redo() {
+        if (redoStack.length > 0) {
+            let nextState = redoStack.pop();
+            undoStack.push(nextState);
+            ladderData = JSON.parse(nextState);
+            render();
+            setTimeout(centerWheelOnPresent, 50);
+        }
+    }
+
+    function del(i) { 
+        saveState(); 
+        ladderData.splice(i, 1); 
+        render(); 
+    }
+
+    function exportData() { 
+        const a = document.createElement('a'); 
+        a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(ladderData)); 
+        a.download = 'GARA_LADDER.json'; 
+        a.click(); 
+    }
+
+    function importData(e) { 
+        const reader = new FileReader(); 
+        reader.onload = (event) => { 
+            saveState(); 
+            ladderData = JSON.parse(event.target.result); 
+            render(); 
+            setTimeout(centerWheelOnPresent, 50);
+        }; 
+        reader.readAsText(e.target.files[0]); 
+    }
+
+    render();
+    window.onload = () => {
+        setTimeout(centerWheelOnPresent, 100);
+    };
+</script>
+</body>
+</html>
