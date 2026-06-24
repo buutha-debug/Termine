@@ -23,7 +23,7 @@
             overflow: hidden;
         }
         
-        /* شبكة التحكم علوية متناسقة */
+        /* لوحة التحكم العلوية */
         .controls-grid { 
             display: grid; 
             grid-template-columns: repeat(3, 1fr); 
@@ -42,12 +42,11 @@
         }
         button:hover { background: #1a1a1a; border-color: #444; }
         
-        /* تمديد زر الإعادة ليملأ الفراغ في السطر الثاني */
         .redo-btn {
             grid-column: span 2;
         }
 
-        /* حاوية الأزرار العمودية لـ Export و Import فوق بعضهم */
+        /* حاوية أزرار Export / Import فوق بعضهم */
         .stacked-box {
             display: flex;
             flex-direction: column;
@@ -61,7 +60,7 @@
         
         #ladder-container { 
             width: 100%; 
-            max-width: 600px; 
+            max-width: 650px; 
             margin: 0 auto; 
             flex: 1 1 auto;
             overflow-y: auto;
@@ -83,19 +82,21 @@
         }
         .rung:hover { border-color: #444; }
 
+        /* القسم الأيمن للملاحظات والعناوين (مساحة أكبر) */
         .rung-right {
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 6px;
         }
 
+        /* القسم الأيسر للتوقيت والتحكم */
         .rung-left {
             display: flex;
             flex-direction: column;
             align-items: flex-start;
-            gap: 6px;
-            min-width: 160px;
+            gap: 8px;
+            min-width: 150px;
             border-right: 1px solid #151515;
             padding-right: 10px;
         }
@@ -126,7 +127,7 @@
             font-family: inherit;
         }
 
-        /* تنسيق التاريخ الرقمي مع الشخطة جهة اليسار */
+        /* حقل التاريخ بالفراغ النظيف البحت */
         .dt-input { 
             color: var(--accent); 
             font-weight: bold; 
@@ -138,7 +139,15 @@
         }
         .dt-input:focus { border-bottom-color: var(--accent); }
         
-        textarea { resize: none; min-height: 50px; color: #aaa; font-size: 0.8rem; }
+        /* الملاحظة المتمددة تلقائياً بدون سكرول */
+        textarea { 
+            resize: none; 
+            min-height: 60px; 
+            color: #aaa; 
+            font-size: 0.85rem; 
+            overflow-y: hidden; 
+            line-height: 1.4;
+        }
         
         .manual-order-box {
             display: flex;
@@ -183,11 +192,20 @@
 <div id="ladder-container"></div>
 
 <script>
+    // جلب البيانات وتنظيفها فوراً من أي بقايا قديمة لحرف T أو الشحطات ليصبح كله فراغات
     let ladderData = JSON.parse(localStorage.getItem('gara_ladder')) || [];
+    ladderData = ladderData.map(item => {
+        if (item.dt) {
+            // استبدال الـ T أو الشخطة المحفوفة بفراغات بفراغين نظيفين، وتوحيد السلايدات لـ /
+            item.dt = item.dt.replace('T', '  ').replace(' - ', '  ').replace(/-/g, '/');
+        }
+        return item;
+    });
+
     let undoStack = [JSON.stringify(ladderData)];
     let redoStack = [];
 
-    // توليد التوقيت بصيغة رقمية نظيفة مع شخطة وفراغات: YYYY/MM/DD - HH:mm
+    // توليد التوقيت الجديد بفراغين فقط
     function getNowNumericString() {
         const now = new Date();
         const y = now.getFullYear();
@@ -195,12 +213,18 @@
         const d = String(now.getDate()).padStart(2, '0');
         const hr = String(now.getHours()).padStart(2, '0');
         const min = String(now.getMinutes()).padStart(2, '0');
-        return `${y}/${m}/${d} - ${hr}:${min}`;
+        return `${y}/${m}/${d}  ${hr}:${min}`;
     }
 
     function saveState() { 
         undoStack.push(JSON.stringify(ladderData)); 
         redoStack = []; 
+    }
+
+    // دالة التمديد التلقائي للملاحظة
+    function autoExpand(textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
     }
 
     function addRung() {
@@ -228,10 +252,10 @@
             div.innerHTML = `
                 <div class="rung-right">
                     <input type="text" placeholder="العنوان أو المرحلة..." value="${item.title}" onchange="ladderData[${i}].title=this.value; saveQuietly();">
-                    <textarea placeholder="الملاحظات والتفاصيل..." onchange="ladderData[${i}].note=this.value; saveQuietly();">${item.note}</textarea>
+                    <textarea placeholder="الملاحظات والتفاصيل..." oninput="autoExpand(this)" onchange="ladderData[${i}].note=this.value; saveQuietly();">${item.note}</textarea>
                 </div>
                 <div class="rung-left">
-                    <input type="text" class="dt-input" value="${item.dt}" placeholder="YYYY/MM/DD - HH:mm" onchange="ladderData[${i}].dt=this.value; saveQuietly();">
+                    <input type="text" class="dt-input" value="${item.dt}" placeholder="YYYY/MM/DD  HH:mm" onchange="ladderData[${i}].dt=this.value; saveQuietly();">
                     <div class="manual-order-box">
                         <button class="order-btn" onclick="moveItem(${i}, -1)">▲ رفع</button>
                         <button class="order-btn" onclick="moveItem(${i}, 1)">▼ تنزيل</button>
@@ -240,6 +264,11 @@
                 </div>
             `;
             container.appendChild(div);
+        });
+
+        // تشغيل التمديد التلقائي للملاحظات فوراً بعد البناء
+        document.querySelectorAll('#ladder-container textarea').forEach(textarea => {
+            autoExpand(textarea);
         });
     }
 
@@ -256,9 +285,9 @@
         render();
     }
 
-    // فك ترميز الشخطة برمجياً لقراءة التاريخ بشكل سليم في المتصفح والفرز
+    // تجهيز صيغة الوقت داخلياً ليفهمها المتصفح أثناء الفرز والترتيب الذكي
     function parseSafeDate(dtStr) {
-        const cleaned = dtStr.trim().replace(' - ', 'T').replace(/\//g, '-');
+        const cleaned = dtStr.trim().replace(/\s+/g, 'T').replace(/\//g, '-');
         return new Date(cleaned);
     }
 
@@ -295,7 +324,7 @@
 
     function sortAndSave() {
         saveState();
-        // الترتيب التنازلي المعتمد على سلسلة النص الرقمية
+        // فرز نظيف يعتمد على الترتيب الأبجدي للأرقام والفراغات الموحدة
         ladderData.sort((a, b) => b.dt.localeCompare(a.dt));
         localStorage.setItem('gara_ladder', JSON.stringify(ladderData));
         render();
@@ -338,7 +367,12 @@
         const reader = new FileReader(); 
         reader.onload = (event) => { 
             saveState(); 
-            ladderData = JSON.parse(event.target.result); 
+            let imported = JSON.parse(event.target.result);
+            // تنظيف البيانات المستوردة أيضاً للتأكيد
+            ladderData = imported.map(item => {
+                if (item.dt) item.dt = item.dt.replace('T', '  ').replace(' - ', '  ').replace(/-/g, '/');
+                return item;
+            });
             render(); 
             setTimeout(centerWheelOnPresent, 50);
         }; 
